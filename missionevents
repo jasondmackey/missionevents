@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 #
-# me_dedup - profile-driven mission_events runner with orbit dedup
-# Version 1.0.0 (2026-09-03)
+# missionevents - profile-driven mission_events runner with orbit dedup
+# Version 2.0.0 (2026-09-03), formerly me_dedup
+# Author: jama2218
 #
 # Runs mission_events on a profile's remote host via ssh, sourcing the mission
 # environment first (equivalent of typing the mission name after login).
@@ -9,23 +10,23 @@
 # show only the StationContact.
 #
 # Usage:
-#   me_dedup                    interactive profile menu (build new from there)
-#   me_dedup --build (-b)       step-by-step profile creator
-#   me_dedup --list  (-l)       list saved profiles
-#   me_dedup <profile> [args]   run via a profile (e.g. me_dedup ixpe -n 0:1)
-#   me_dedup [args]             run via the default profile (ixpe)
-#   me_dedup --help  (-h)       quick reference
+#   missionevents                    interactive profile menu (build new from there)
+#   missionevents --build (-b)       step-by-step profile creator
+#   missionevents --list  (-l)       list saved profiles
+#   missionevents <profile> [args]   run via a profile (e.g. missionevents ixpe -n 0:1)
+#   missionevents [args]             run via the default profile (ixpe)
+#   missionevents --help  (-h)       quick reference
 #
-# Profiles: ~/.me_dedup/profiles/<name>  (plain KEY=VALUE, hand-editable)
+# Profiles: ~/.missionevents/profiles/<name>  (plain KEY=VALUE, hand-editable)
 # Requires: zsh, awk, ssh. No local mission software needed.
 #
-typeset -g ME_DEDUP_DIR="${ME_DEDUP_DIR:-$HOME/.me_dedup}"
-typeset -g ME_DEDUP_PROFILES="$ME_DEDUP_DIR/profiles"
-typeset -g ME_DEDUP_DEFAULT="ixpe"
+typeset -g MISSIONEVENTS_DIR="${MISSIONEVENTS_DIR:-$HOME/.missionevents}"
+typeset -g MISSIONEVENTS_PROFILES="$MISSIONEVENTS_DIR/profiles"
+typeset -g MISSIONEVENTS_DEFAULT="ixpe"
 
 # shared dedup filter: header preserved, chronological order preserved, other event
 # types pass through untouched, AscendingNode dropped when its orbit has a StationContact
-_me_dedup_filter() {
+_missionevents_filter() {
   awk '
     /^20[0-9][0-9]\// { data=1 }
     !data            { print; next }
@@ -38,12 +39,15 @@ _me_dedup_filter() {
     }'
 }
 
-# first run: seed the known-good ixpe profile (matches the original me_dedup behavior)
-_me_dedup_seed() {
-  [[ -d $ME_DEDUP_PROFILES ]] || mkdir -p "$ME_DEDUP_PROFILES"
-  [[ -f $ME_DEDUP_PROFILES/ixpe ]] && return
-  cat > "$ME_DEDUP_PROFILES/ixpe" <<'EOF'
-# me_dedup profile: ixpe
+# first run: migrate me_dedup v1 profiles, then seed the known-good ixpe profile
+_missionevents_seed() {
+  if [[ ! -d $MISSIONEVENTS_DIR && -d $HOME/.me_dedup ]]; then
+    mv "$HOME/.me_dedup" "$MISSIONEVENTS_DIR"
+  fi
+  [[ -d $MISSIONEVENTS_PROFILES ]] || mkdir -p "$MISSIONEVENTS_PROFILES"
+  [[ -f $MISSIONEVENTS_PROFILES/ixpe ]] && return
+  cat > "$MISSIONEVENTS_PROFILES/ixpe" <<'EOF'
+# missionevents profile: ixpe
 HOST="green-ixpe-gp1"
 REMOTE_USER=""
 SOURCE_CMD="source /lasp/ixpe/setup.bourne"
@@ -56,32 +60,32 @@ EOF
 }
 
 # load profile $1 into the caller's local vars (zsh dynamic scoping)
-_me_dedup_load() {
-  local f="$ME_DEDUP_PROFILES/$1"
+_missionevents_load() {
+  local f="$MISSIONEVENTS_PROFILES/$1"
   if [[ ! -f $f ]]; then
-    print -u2 "me_dedup: no profile '$1' (looked in $ME_DEDUP_PROFILES)"
-    print -u2 "Run 'me_dedup --list' to see profiles, 'me_dedup --build' to create one."
+    print -u2 "missionevents: no profile '$1' (looked in $MISSIONEVENTS_PROFILES)"
+    print -u2 "Run 'missionevents --list' to see profiles, 'missionevents --build' to create one."
     return 1
   fi
   source "$f"
 }
 
-_me_dedup_list() {
+_missionevents_list() {
   local -a names
-  names=("$ME_DEDUP_PROFILES"/*(N:t))
-  (( $#names )) || { print "No profiles yet. Run 'me_dedup --build'."; return; }
+  names=("$MISSIONEVENTS_PROFILES"/*(N:t))
+  (( $#names )) || { print "No profiles yet. Run 'missionevents --build'."; return; }
   local n HOST REMOTE_USER NOTES
   for n in $names; do
     HOST= REMOTE_USER= NOTES=
-    source "$ME_DEDUP_PROFILES/$n" 2>/dev/null
+    source "$MISSIONEVENTS_PROFILES/$n" 2>/dev/null
     printf "%-10s %s%s %s\n" "$n" "${REMOTE_USER:+$REMOTE_USER@}" "$HOST" "${NOTES:+- $NOTES}"
   done
 }
 
 # interactive wizard: explains each setting, Enter accepts [default] or skips optional
-_me_dedup_build() {
+_missionevents_build() {
   local name host ruser source_cmd dedup type_names default_n ssh_opts notes yn
-  print "=== me_dedup profile builder ==="
+  print "=== missionevents profile builder ==="
   print "Each setting is explained first. Enter accepts the [default] or skips optional ones.\n"
 
   print "PROFILE NAME: short label used to select this profile (e.g. ixpe, mms, tsis2)."
@@ -89,7 +93,7 @@ _me_dedup_build() {
   read "name?Profile name: "
   name=${${name//[[:space:]]/}:l}
   [[ -n $name ]] || { print "Aborted: a name is required."; return 1; }
-  if [[ -f $ME_DEDUP_PROFILES/$name ]]; then
+  if [[ -f $MISSIONEVENTS_PROFILES/$name ]]; then
     read "yn?Profile '$name' already exists. Overwrite? [y/N]: "
     [[ ${yn:l} == y* ]] || { print "Aborted."; return 1; }
   fi
@@ -112,7 +116,7 @@ _me_dedup_build() {
   : ${source_cmd:=$guess}
 
   print "\nDEDUP: when an orbit has BOTH AscendingNode and StationContact events, show only"
-  print "  the StationContact (classic me_dedup behavior). Answer n to keep all rows."
+  print "  the StationContact (the classic dedup behavior). Answer n to keep all rows."
   read "dedup?Dedup AscendingNode duplicates? [Y/n]: "
   [[ ${${dedup:l}:-y} == n* ]] && dedup=n || dedup=y
 
@@ -128,11 +132,11 @@ _me_dedup_build() {
   print "  gateways). A Host entry in ~/.ssh/config is usually the better place. Skip normally."
   read "ssh_opts?Extra ssh options [skip]: "
 
-  print "\nDESCRIPTION: one line shown next to the profile in 'me_dedup --list'."
+  print "\nDESCRIPTION: one line shown next to the profile in 'missionevents --list'."
   read "notes?Description [skip]: "
 
   {
-    print -r -- "# me_dedup profile: $name"
+    print -r -- "# missionevents profile: $name"
     print -r -- "HOST=\"${host//\"/\\\"}\""
     print -r -- "REMOTE_USER=\"${ruser//\"/\\\"}\""
     print -r -- "SOURCE_CMD=\"${source_cmd//\"/\\\"}\""
@@ -141,50 +145,50 @@ _me_dedup_build() {
     print -r -- "DEFAULT_N=\"${default_n//\"/\\\"}\""
     print -r -- "SSH_OPTS=\"${ssh_opts//\"/\\\"}\""
     print -r -- "NOTES=\"${notes//\"/\\\"}\""
-  } > "$ME_DEDUP_PROFILES/$name" || return 1
-  print "\nSaved: $ME_DEDUP_PROFILES/$name"
+  } > "$MISSIONEVENTS_PROFILES/$name" || return 1
+  print "\nSaved: $MISSIONEVENTS_PROFILES/$name"
 
   read "yn?Test it now? ssh to $host and list event types (password prompt if no ssh keys). [Y/n]: "
   [[ ${${yn:l}:-y} == n* ]] && return 0
   local target="$host"; [[ -n $ruser ]] && target="$ruser@$host"
   if ssh ${=ssh_opts} "$target" "$source_cmd >/dev/null 2>&1 && mission_events --print-event-types 2>&1 | head -5"; then
-    print "Profile works. Try: me_dedup $name"
+    print "Profile works. Try: missionevents $name"
   else
     print -u2 "Test failed -- check host, username, ssh access, and the source command."
-    print -u2 "The profile was saved anyway; edit $ME_DEDUP_PROFILES/$name and retest."
+    print -u2 "The profile was saved anyway; edit $MISSIONEVENTS_PROFILES/$name and retest."
   fi
 }
 
 # interactive profile picker (no profile name memorizing required)
-_me_dedup_menu() {
+_missionevents_menu() {
   local -a names
-  names=("$ME_DEDUP_PROFILES"/*(N:t))
+  names=("$MISSIONEVENTS_PROFILES"/*(N:t))
   print "Saved profiles:"
   local i sel pargs
   local HOST REMOTE_USER NOTES
   for i in {1..$#names}; do
     HOST= REMOTE_USER= NOTES=
-    source "$ME_DEDUP_PROFILES/$names[$i]" 2>/dev/null
+    source "$MISSIONEVENTS_PROFILES/$names[$i]" 2>/dev/null
     printf "  %d) %-10s %s%s %s\n" "$i" "$names[$i]" "${REMOTE_USER:+$REMOTE_USER@}" "$HOST" "${NOTES:+- $NOTES}"
   done
   print "  b) Build a new profile"
   read "sel?Select profile [1]: "
   sel=${sel:-1}
-  if [[ ${sel:l} == b* ]]; then _me_dedup_build; return; fi
+  if [[ ${sel:l} == b* ]]; then _missionevents_build; return; fi
   if [[ ! $sel == <-> || $sel -lt 1 || $sel -gt $#names ]]; then
-    print -u2 "me_dedup: invalid selection"; return 1
+    print -u2 "missionevents: invalid selection"; return 1
   fi
   read "pargs?mission_events args for '$names[$sel]' [Enter = profile defaults]: "
   if [[ -n $pargs ]]; then
-    me_dedup "$names[$sel]" ${(z)pargs}
+    missionevents "$names[$sel]" ${(z)pargs}
   else
-    me_dedup "$names[$sel]"
+    missionevents "$names[$sel]"
   fi
 }
 
-_me_dedup_help() {
+_missionevents_help() {
   cat <<'EOF'
-me_dedup - mission_events without duplicate orbits, across missions
+missionevents - mission_events without duplicate orbits, across missions
            (orbits with a StationContact hide their AscendingNode)
 
 Runs mission_events on the profile's remote host via ssh (mission env is
@@ -192,15 +196,15 @@ sourced automatically; password prompt if you have no ssh keys -- normal).
 Events include both predicted and historical (actual).
 
 PROFILES (multi-mission: IXPE, MMS, IMAP, TSIS, TSIS2, CPRS, ...):
-    me_dedup                        interactive menu: pick a profile or build one
-    me_dedup --build (-b)           step-by-step profile creator (explains each setting)
-    me_dedup --list (-l)            list saved profiles
-    me_dedup <profile> [args]       run via that profile (e.g. me_dedup ixpe -n 0:1)
-    Profiles: ~/.me_dedup/profiles/ (plain KEY=VALUE text, hand-editable)
+    missionevents                        interactive menu: pick a profile or build one
+    missionevents --build (-b)           step-by-step profile creator (explains each setting)
+    missionevents --list (-l)            list saved profiles
+    missionevents <profile> [args]       run via that profile (e.g. missionevents ixpe -n 0:1)
+    Profiles: ~/.missionevents/profiles/ (plain KEY=VALUE text, hand-editable)
 
 USAGE (args not matching a profile go to the default profile, ixpe):
-    me_dedup -n <range> --type-names AscendingNode StationContact
-    me_dedup "2026/001" "2026/014" [--contacts]   # explicit date range
+    missionevents -n <range> --type-names AscendingNode StationContact
+    missionevents "2026/001" "2026/014" [--contacts]   # explicit date range
     (-n 1 is shorthand for -n 0:1, today to tomorrow)
 
 COMMON TIME RANGES:
@@ -218,38 +222,38 @@ OTHER USEFUL FLAGS (passed through to mission_events):
                                         files are written on the remote host)
 
 EXAMPLES (shown for the default ixpe profile):
-    me_dedup -n 0:3 --type-names AscendingNode StationContact     # next 3 days (planning)
-    me_dedup -n 0:1 --type-names AscendingNode StationContact     # today only
-    me_dedup -n -3:4 --type-names AscendingNode StationContact    # this week, past + future
-    me_dedup -n 0:7 --type-names AscendingNode StationContact | grep -c IXPE   # count unique orbits
-    me_dedup -n -7:0 --type-names AscendingNode StationContact > weekly.txt    # save weekly report
-    me_dedup -n 0:7 --type-names AscendingNode StationContact | grep Station   # contacts only
-    me_dedup -n 0:1 --contacts                                    # contact schedule
-    me_dedup -n 0:7 --type-names Slew                             # upcoming slews
-    me_dedup -n 0:1 --exclude-type-names AscendingNode Penumbra   # hide noisy types
-    me_dedup imap -n 0:7 --contacts                               # another mission
+    missionevents -n 0:3 --type-names AscendingNode StationContact     # next 3 days (planning)
+    missionevents -n 0:1 --type-names AscendingNode StationContact     # today only
+    missionevents -n -3:4 --type-names AscendingNode StationContact    # this week, past + future
+    missionevents -n 0:7 --type-names AscendingNode StationContact | grep -c IXPE   # count unique orbits
+    missionevents -n -7:0 --type-names AscendingNode StationContact > weekly.txt    # save weekly report
+    missionevents -n 0:7 --type-names AscendingNode StationContact | grep Station   # contacts only
+    missionevents -n 0:1 --contacts                                    # contact schedule
+    missionevents -n 0:7 --type-names Slew                             # upcoming slews
+    missionevents -n 0:1 --exclude-type-names AscendingNode Penumbra   # hide noisy types
+    missionevents imap -n 0:7 --contacts                               # another mission
 
 NOTE: -h/--help show this card. For a mission's full mission_events flag list:
       ssh <host> 'source <setup> && mission_events -h'
-      (host and setup for each profile are in ~/.me_dedup/profiles/<name>)
+      (host and setup for each profile are in ~/.missionevents/profiles/<name>)
 EOF
 }
 
-me_dedup() {
-  _me_dedup_seed
+missionevents() {
+  _missionevents_seed
   case "$1" in
-    --help|-h)  _me_dedup_help;  return ;;
-    --build|-b) _me_dedup_build; return ;;
-    --list|-l)  _me_dedup_list;  return ;;
-    "")         _me_dedup_menu;  return ;;
+    --help|-h)  _missionevents_help;  return ;;
+    --build|-b) _missionevents_build; return ;;
+    --list|-l)  _missionevents_list;  return ;;
+    "")         _missionevents_menu;  return ;;
   esac
 
-  local profile="$ME_DEDUP_DEFAULT"
-  if [[ -f $ME_DEDUP_PROFILES/$1 ]]; then profile="$1"; shift; fi
+  local profile="$MISSIONEVENTS_DEFAULT"
+  if [[ -f $MISSIONEVENTS_PROFILES/$1 ]]; then profile="$1"; shift; fi
 
   local HOST REMOTE_USER SOURCE_CMD DEDUP TYPE_NAMES DEFAULT_N SSH_OPTS NOTES
   HOST= REMOTE_USER= SOURCE_CMD= DEDUP=y TYPE_NAMES= DEFAULT_N= SSH_OPTS= NOTES=
-  _me_dedup_load "$profile" || return 1
+  _missionevents_load "$profile" || return 1
 
   # no args at all -> apply the profile's defaults (if any)
   if (( $# == 0 )); then
@@ -268,11 +272,11 @@ me_dedup() {
     return
   fi
   if [[ $DEDUP == y ]]; then
-    ssh ${=SSH_OPTS} "$target" "$cmd" | _me_dedup_filter
+    ssh ${=SSH_OPTS} "$target" "$cmd" | _missionevents_filter
   else
     ssh ${=SSH_OPTS} "$target" "$cmd"
   fi
 }
 
 # ---- dispatch ----
-me_dedup "$@"
+missionevents "$@"
